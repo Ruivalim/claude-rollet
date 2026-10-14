@@ -171,3 +171,24 @@ func TestDelayCommand(t *testing.T) {
 		t.Error("unknown provider must fail")
 	}
 }
+
+func TestSessionsRm(t *testing.T) {
+	t.Setenv("ROLLET_HOME", t.TempDir())
+	st := openStore()
+	for _, id := range []string{"aaa111", "aab222", "bbb333"} {
+		_, _, _ = st.Touch(id, store.Info{}, func() (string, string, error) { return "p", "", nil })
+	}
+	if err := cmdSessions([]string{"rm", "aa"}); err == nil {
+		t.Error("ambiguous prefix must not delete anything")
+	}
+	if err := cmdSessions([]string{"rm", "aaa", "bbb"}); err != nil {
+		t.Fatal(err)
+	}
+	list, _ := st.List()
+	if len(list) != 1 || list[0].ID != "aab222" {
+		t.Errorf("left = %+v", list)
+	}
+	if err := cmdSessions([]string{"rm"}); err == nil {
+		t.Error("rm without ids must fail")
+	}
+}

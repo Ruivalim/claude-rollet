@@ -360,9 +360,6 @@ func TestDelay(t *testing.T) {
 		post(t, px.URL+"/v1/messages", "d1", body)
 		return time.Since(start)
 	}
-	if d := timed(`{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`); d > 100*time.Millisecond {
-		t.Errorf("quota probe was delayed %v", d)
-	}
 	if d := timed(msgBody); d < 300*time.Millisecond {
 		t.Errorf("first turn took %v, want >= 300ms", d)
 	}
@@ -370,7 +367,7 @@ func TestDelay(t *testing.T) {
 	if d := timed(later); d < 100*time.Millisecond || d > 290*time.Millisecond {
 		t.Errorf("later turn took %v, want the between range", d)
 	}
-	if got.n() != 3 {
+	if got.n() != 2 {
 		t.Errorf("upstream calls = %d", got.n())
 	}
 }
@@ -463,5 +460,28 @@ func TestCodexNotLoggedIn(t *testing.T) {
 	}
 	if got.n() != 0 {
 		t.Error("no token, no upstream call")
+	}
+}
+
+func TestQuotaProbeGoesToAnthropicWithoutSession(t *testing.T) {
+	anth, gotA := fakeAnthropic(t)
+	up, gotO := fakeOpenAI(t, 200)
+	px, s := newProxy(t,
+		config.Provider{Name: "claude", Type: config.TypeAnthropic, BaseURL: anth.URL},
+		config.Provider{Name: "mimo", Type: config.TypeOpenAI, BaseURL: up.URL + "/v1", APIKey: "k", Model: "m"},
+	)
+	s.Intn = func(int64) int64 { return 1 } // would roll mimo
+	s.Config().Delay = &config.Delay{First: "2s"}
+
+	start := time.Now()
+	resp, _ := post(t, px.URL+"/v1/messages", "q1", `{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`)
+	if resp.StatusCode != 200 || gotA.n() != 1 || gotO.n() != 0 {
+		t.Fatalf("status %d, anthropic %d, mimo %d", resp.StatusCode, gotA.n(), gotO.n())
+	}
+	if time.Since(start) > time.Second {
+		t.Error("quota check must not be delayed")
+	}
+	if list, _ := s.Store.List(); len(list) != 0 {
+		t.Errorf("quota check left a session behind: %+v", list)
 	}
 }

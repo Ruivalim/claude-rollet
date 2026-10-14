@@ -136,3 +136,17 @@ func TestListModels(t *testing.T) {
 		t.Error("401 must be an error")
 	}
 }
+
+func TestRunPausedProvider(t *testing.T) {
+	srv := fakeModel(t, true)
+	p := provider(srv.URL)
+	zero := 0
+	p.Weight = &zero
+	res, err := Run(context.Background(), p, nil)
+	if err != nil {
+		t.Fatalf("a paused provider must still be testable: %v", err)
+	}
+	if !res[0].OK {
+		t.Errorf("text check: %+v", res[0])
+	}
+}

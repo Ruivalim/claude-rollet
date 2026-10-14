@@ -17,6 +17,16 @@ claude ──► rollet (127.0.0.1:7777) ──┬──► Anthropic API     (p
                                      └──► ChatGPT / any OpenAI-compatible endpoint
 ```
 
+## What it looks like
+
+Claude Code says Opus 5.5, and so does the model when you ask:
+
+![Claude Code session answering "I'm Claude Opus 5.5"](docs/screenshots/chat.png)
+
+The only hint is the base URL in `/status`:
+
+![Claude Code /status pointing at rollet on 127.0.0.1:7777](docs/screenshots/status.png)
+
 ## How it stays blind
 
 - **One roll per session.** The first request of a Claude Code session picks a provider
@@ -72,7 +82,7 @@ the line (or `rollet service uninstall` tells you to).
 ## The experiment
 
 ```sh
-rollet sessions             # browse: enter opens, g guesses, r reveals
+rollet sessions             # browse: enter opens, g guesses, r reveals, d deletes
 rollet guess 3f2a mimo      # record your guess (prefix of the session id is enough)
 rollet reveal 3f2a          # "It was claude (as requested). You guessed mimo. Wrong."
 rollet stats                # your accuracy, exact provider and "Claude or not?"

@@ -45,6 +45,9 @@ var (
 	legacySessionRe = regexp.MustCompile(`session_([0-9a-fA-F-]{36})`)
 	cwdRe           = regexp.MustCompile(`(?m)(?:Primary working directory|Working directory):\s*(\S+)`)
 	reminderRe      = regexp.MustCompile(`(?s)<system-reminder>.*?</system-reminder>`)
+	// Claude Code wraps the prompt in tags like <session>…</session> in the
+	// API request; only the tags go, the text inside stays.
+	wrapperTagRe = regexp.MustCompile(`</?[a-zA-Z][\w-]*>`)
 )
 
 // Request is what rollet extracts from one /v1/messages call.
@@ -146,19 +149,31 @@ func title(v requestView) string {
 			continue
 		}
 		for _, t := range textsOf(m.Content) {
-			t = strings.TrimSpace(reminderRe.ReplaceAllString(t, ""))
-			if t == "" {
-				continue
+			if t = CleanTitle(t); t != "" {
+				return t
 			}
-			t = strings.Join(strings.Fields(t), " ")
-			if r := []rune(t); len(r) > 100 {
-				t = string(r[:100]) + "…"
-			}
-			return t
 		}
 		return ""
 	}
 	return ""
+}
+
+// CleanTitle turns a raw first user message into a one-line title. Claude
+// Code's title request wraps the prompt as "<session>…</session> Write the
+// title…", and that request arrives before the main one, so the text inside
+// <session> is the actual prompt. Also used when listing sessions, which
+// repairs titles stored before this existed (some cut mid-tag).
+func CleanTitle(t string) string {
+	t = reminderRe.ReplaceAllString(t, "")
+	if _, inner, ok := strings.Cut(t, "<session>"); ok {
+		t, _, _ = strings.Cut(inner, "</")
+	}
+	t = wrapperTagRe.ReplaceAllString(t, " ")
+	t = strings.Join(strings.Fields(t), " ")
+	if r := []rune(t); len(r) > 100 {
+		t = string(r[:100]) + "…"
+	}
+	return t
 }
 
 func textsOf(raw json.RawMessage) []string {

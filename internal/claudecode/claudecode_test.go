@@ -113,3 +113,41 @@ func TestProbeAndFirstTurn(t *testing.T) {
 		t.Error("missing max_tokens is not a probe")
 	}
 }
+
+func TestTitleDropsWrapperTags(t *testing.T) {
+	r := Parse(nil, []byte(`{"messages":[{"role":"user","content":[
+	  {"type":"text","text":"<system-reminder>ctx</system-reminder>"},
+	  {"type":"text","text":"<session>Hey mate, how we doing today?</session>"}]}]}`))
+	if r.Title != "Hey mate, how we doing today?" {
+		t.Errorf("title = %q", r.Title)
+	}
+	// a prompt that only had tags in it falls through to the next block
+	r = Parse(nil, []byte(`{"messages":[{"role":"user","content":[{"type":"text","text":"<session></session>"},{"type":"text","text":"real one"}]}]}`))
+	if r.Title != "real one" {
+		t.Errorf("title = %q", r.Title)
+	}
+	// comparisons like a < b stay intact
+	r = Parse(nil, []byte(`{"messages":[{"role":"user","content":"why is a < b true when b > a"}]}`))
+	if r.Title != "why is a < b true when b > a" {
+		t.Errorf("title = %q", r.Title)
+	}
+}
+
+func TestTitleFromClaudeCodeTitleRequest(t *testing.T) {
+	// Captured from Claude Code 2.1.299 in interactive mode.
+	body := `{"max_tokens":128000,"messages":[{"role":"user","content":[{"type":"text","text":"<session>\noi, responde so com: ok um\n</session>\n\nWrite the title in the predominant language of the session."}]}]}`
+	if got := Parse(nil, []byte(body)).Title; got != "oi, responde so com: ok um" {
+		t.Errorf("title = %q", got)
+	}
+	// titles stored by older versions, cut mid-tag
+	for stored, want := range map[string]string{
+		"<session> Hey mate, how we doing today? </session…":             "Hey mate, how we doing today?",
+		"<session> Eaiii meu, belezinha? </session> Write the title in…": "Eaiii meu, belezinha?",
+		"<session> Hey mate, how we doing today? </sessi…":               "Hey mate, how we doing today?",
+		"plain old title": "plain old title",
+	} {
+		if got := CleanTitle(stored); got != want {
+			t.Errorf("CleanTitle(%q) = %q, want %q", stored, got, want)
+		}
+	}
+}

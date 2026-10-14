@@ -10,6 +10,7 @@ import (
 	"maps"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -139,6 +140,16 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 	}
 	cc := claudecode.Parse(r.Header, body)
 	cfg := s.Config()
+	s.dump(r, body, cc)
+
+	// Claude Code's startup quota check asks about Claude's own quota and
+	// carries no user content. It goes straight to Anthropic and never rolls
+	// or records a session: otherwise every launch you quit right away left
+	// an empty session behind.
+	if cc.Probe {
+		s.passthrough(w, r, body, s.defaultAnthropic())
+		return
+	}
 
 	sess, isNew, err := s.Store.Touch(cc.SessionID, store.Info{CWD: cc.CWD, Title: cc.Title}, func() (string, string, error) {
 		p, err := roll.Pick(cfg, s.Intn)
@@ -161,10 +172,8 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		s.Log.Printf("session %s rolled -> %s  (%s)", short(sess.ID), s.name(prov), cc.CWD)
 	}
 
-	if !cc.Probe {
-		if !s.wait(r.Context(), cfg.DelayFor(*prov, cc.FirstTurn), sess.ID) {
-			return // client gave up while we were holding the request
-		}
+	if !s.wait(r.Context(), cfg.DelayFor(*prov, cc.FirstTurn), sess.ID) {
+		return // client gave up while we were holding the request
 	}
 
 	a, _ := adapters.Get(prov.Type)
@@ -307,6 +316,49 @@ func (s *Server) openai(w http.ResponseWriter, r *http.Request, body []byte, p c
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// dump writes a summary of each request to $ROLLET_DUMP_DIR, for debugging
+// what Claude Code actually sends. Opt-in and local: it contains prompts.
+func (s *Server) dump(r *http.Request, body []byte, cc claudecode.Request) {
+	dir := os.Getenv("ROLLET_DUMP_DIR")
+	if dir == "" {
+		return
+	}
+	var v struct {
+		Model     string            `json:"model"`
+		MaxTokens int               `json:"max_tokens"`
+		Tools     []json.RawMessage `json:"tools"`
+		Stream    bool              `json:"stream"`
+		Messages  []struct {
+			Role    string          `json:"role"`
+			Content json.RawMessage `json:"content"`
+		} `json:"messages"`
+		System json.RawMessage `json:"system"`
+	}
+	_ = json.Unmarshal(body, &v)
+	last := ""
+	if n := len(v.Messages); n > 0 {
+		last = string(v.Messages[n-1].Content)
+	}
+	sum := map[string]any{
+		"time": time.Now().Format(time.RFC3339Nano), "session": cc.SessionID,
+		"header_session": r.Header.Get(claudecode.SessionHeader), "model": v.Model,
+		"max_tokens": v.MaxTokens, "tools": len(v.Tools), "stream": v.Stream,
+		"messages": len(v.Messages), "probe": cc.Probe, "first_turn": cc.FirstTurn,
+		"cwd": cc.CWD, "title": cc.Title,
+		"system_head": clipStr(string(v.System), 300), "last_message": clipStr(last, 600),
+	}
+	raw, _ := json.MarshalIndent(sum, "", "  ")
+	_ = os.MkdirAll(dir, 0o700)
+	_ = os.WriteFile(filepath.Join(dir, time.Now().Format("150405.000000")+".json"), raw, 0o600)
+}
+
+func clipStr(s string, n int) string {
+	if len(s) > n {
+		return s[:n] + "…"
+	}
+	return s
 }
 
 // wait sleeps for a random duration inside rg. It returns false if the

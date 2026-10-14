@@ -51,7 +51,7 @@ func sections() []section {
 			{"service", "<action>", "run 24/7 via systemd/launchd: install, uninstall, restart, status, logs [-f]", cmdService},
 		}},
 		{"The experiment", []command{
-			{"sessions", "[--reveal] [-n N]", "browse sessions (enter opens, g guesses, r reveals)", cmdSessions},
+			{"sessions", "[--reveal] [-n N] | rm <id...>", "browse sessions (enter open, g guess, r reveal, d delete)", cmdSessions},
 			{"open", "<id>", "cd into the project and resume the session through rollet", cmdOpen},
 			{"guess", "<id> [provider]", "record which provider you think it was", cmdGuess},
 			{"reveal", "<id>", "show where a session went (and if you got it right)", cmdReveal},

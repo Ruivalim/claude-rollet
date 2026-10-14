@@ -324,6 +324,7 @@ func runProbe(p config.Provider) ([]probe.Result, bool, error) {
 		hint("%s forwards Claude Code's own login, nothing to test from here.", p.Name)
 		return nil, false, nil
 	}
+	p.Weight = nil // a paused provider can still be tested
 	if err := (&config.Config{Providers: []config.Provider{p}}).Validate(); err != nil {
 		return nil, false, err
 	}

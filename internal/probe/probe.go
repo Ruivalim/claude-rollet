@@ -51,6 +51,9 @@ func Names() []string {
 // Run executes every check, calling onResult as each one finishes. A failed
 // check doesn't stop the others: knowing text works but tools don't is useful.
 func Run(ctx context.Context, p config.Provider, onResult func(Result)) ([]Result, error) {
+	// A paused provider (weight 0) is still worth testing before you
+	// unpause it; the weight only matters to the roll.
+	p.Weight = nil
 	cfg := &config.Config{Providers: []config.Provider{p}}
 	if err := cfg.Validate(); err != nil {
 		return nil, err

@@ -145,3 +145,23 @@ func TestGuessAfterRevealIsRefused(t *testing.T) {
 		t.Errorf("blind guess was lost: %+v", s)
 	}
 }
+
+func TestDelete(t *testing.T) {
+	st := New(filepath.Join(t.TempDir(), "s.json"))
+	roll := func() (string, string, error) { return "p", "", nil }
+	for _, id := range []string{"a", "b", "c"} {
+		_, _, _ = st.Touch(id, Info{}, roll)
+	}
+	n, err := st.Delete("a", "c", "ghost")
+	if err != nil || n != 2 {
+		t.Fatalf("n=%d err=%v", n, err)
+	}
+	list, _ := st.List()
+	if len(list) != 1 || list[0].ID != "b" {
+		t.Errorf("left = %+v", list)
+	}
+	// a deleted session that comes back is a new session with a new roll
+	if _, isNew, _ := st.Touch("a", Info{}, roll); !isNew {
+		t.Error("deleted session should roll again if it shows up")
+	}
+}

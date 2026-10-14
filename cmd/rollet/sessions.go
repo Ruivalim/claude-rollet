@@ -24,6 +24,9 @@ import (
 )
 
 func cmdSessions(args []string) error {
+	if len(args) > 0 && args[0] == "rm" {
+		return sessionsRm(args[1:])
+	}
 	fs := flag.NewFlagSet("sessions", flag.ContinueOnError)
 	reveal := fs.Bool("reveal", false, "show providers (spoils the experiment)")
 	limit := fs.Int("n", 50, "how many sessions")
@@ -82,7 +85,7 @@ func sessionsTable(list []store.Session, reveal bool) string {
 		if prov == hiddenProvider {
 			prov = sHidden.Render(prov)
 		}
-		rows = append(rows, []string{shortID(s.ID), ago(s.LastSeen), project(s.CWD), fmt.Sprint(s.Requests), guessCell(s), prov, clip(s.Title, 50)})
+		rows = append(rows, []string{shortID(s.ID), ago(s.LastSeen), project(s.CWD), fmt.Sprint(s.Requests), guessCell(s), prov, clip(claudecode.CleanTitle(s.Title), 50)})
 	}
 	return table([]string{"ID", "LAST", "PROJECT", "REQ", "GUESS", "PROVIDER", "FIRST PROMPT"}, rows)
 }
@@ -90,7 +93,7 @@ func sessionsTable(list []store.Session, reveal bool) string {
 // --- interactive browser ---
 
 type browseAction struct {
-	kind string // open, guess, reveal
+	kind string // open, guess, reveal, delete
 	id   string
 }
 
@@ -107,7 +110,7 @@ func browse(list []store.Session, reveal bool) error {
 	}
 	rows := make([]btable.Row, len(list))
 	for i, s := range list {
-		rows[i] = btable.Row{shortID(s.ID), ago(s.LastSeen), clip(project(s.CWD), 18), fmt.Sprint(s.Requests), guessCell(s), providerCell(s, reveal), clip(s.Title, 48)}
+		rows[i] = btable.Row{shortID(s.ID), ago(s.LastSeen), clip(project(s.CWD), 18), fmt.Sprint(s.Requests), guessCell(s), providerCell(s, reveal), clip(claudecode.CleanTitle(s.Title), 48)}
 	}
 	st := btable.DefaultStyles()
 	st.Header = st.Header.BorderStyle(lipgloss.NormalBorder()).BorderBottom(true).Bold(true).Foreground(muted)
@@ -115,7 +118,7 @@ func browse(list []store.Session, reveal bool) error {
 	t := btable.New(btable.WithColumns(cols), btable.WithRows(rows), btable.WithFocused(true),
 		btable.WithHeight(min(len(rows)+1, 20)), btable.WithStyles(st))
 
-	final, err := tea.NewProgram(browser{tbl: t, list: list}).Run()
+	final, err := tea.NewProgram(browser{tbl: t, list: list}, tea.WithAltScreen()).Run()
 	if err != nil {
 		return err
 	}
@@ -130,7 +133,63 @@ func browse(list []store.Session, reveal bool) error {
 		return cmdGuess([]string{a.id})
 	case "reveal":
 		return cmdReveal([]string{a.id})
+	case "delete":
+		deleted, err := confirmDelete(a.id)
+		if err != nil {
+			return err
+		}
+		if !deleted {
+			return browse(list, reveal)
+		}
+		rest, err := openStore().List()
+		if err != nil || len(rest) == 0 {
+			return err
+		}
+		return browse(rest[:min(len(rest), len(list))], reveal)
 	}
+	return nil
+}
+
+func confirmDelete(id string) (bool, error) {
+	sess, err := openStore().Find(id)
+	if err != nil {
+		return false, err
+	}
+	yes := false
+	if err := huh.NewForm(huh.NewGroup(huh.NewConfirm().
+		Title("Delete session " + shortID(sess.ID) + "?").
+		Description(clip(claudecode.CleanTitle(sess.Title), 70) + "\nOnly rollet's record goes; Claude Code's transcript stays.").
+		Affirmative("Delete").Negative("Keep").Value(&yes))).WithTheme(theme()).Run(); err != nil {
+		return false, err
+	}
+	if !yes {
+		return false, nil
+	}
+	if _, err := openStore().Delete(sess.ID); err != nil {
+		return false, err
+	}
+	ok("Deleted %s.", shortID(sess.ID))
+	return true, nil
+}
+
+func sessionsRm(args []string) error {
+	if len(args) == 0 {
+		return errors.New("usage: rollet sessions rm <id> [id...]")
+	}
+	st := openStore()
+	var ids []string
+	for _, a := range args {
+		sess, err := st.Find(a)
+		if err != nil {
+			return err
+		}
+		ids = append(ids, sess.ID)
+	}
+	n, err := st.Delete(ids...)
+	if err != nil {
+		return err
+	}
+	ok("Deleted %d session(s).", n)
 	return nil
 }
 
@@ -151,6 +210,9 @@ func (b browser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			b.action = &browseAction{"reveal", b.list[sel].ID}
 			return b, tea.Quit
+		case "d", "delete":
+			b.action = &browseAction{"delete", b.list[sel].ID}
+			return b, tea.Quit
 		}
 	}
 	var cmd tea.Cmd
@@ -159,7 +221,7 @@ func (b browser) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (b browser) View() string {
-	help := sMuted.Render("↑/↓ move · enter open · g guess · r reveal · q quit")
+	help := sMuted.Render("↑/↓ move · enter open · g guess · r reveal · d delete · q quit")
 	return b.tbl.View() + "\n" + help + "\n"
 }
 

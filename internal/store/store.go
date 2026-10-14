@@ -172,6 +172,22 @@ func (s *Store) MarkRevealed(id string) (Session, error) {
 	return out, err
 }
 
+// Delete removes sessions by full id and reports how many existed. Claude
+// Code's own transcripts are untouched.
+func (s *Store) Delete(ids ...string) (int, error) {
+	n := 0
+	err := s.update(func(m map[string]*Session) error {
+		for _, id := range ids {
+			if _, ok := m[id]; ok {
+				delete(m, id)
+				n++
+			}
+		}
+		return nil
+	})
+	return n, err
+}
+
 func (s *Store) update(fn func(map[string]*Session) error) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
