@@ -114,7 +114,7 @@ and a turn you cancel while it's being held never reaches the provider.
 
 | Field | Meaning |
 |---|---|
-| `type` | `anthropic` (passthrough, no translation) or an adapter: `mimo`, `deepseek`, `chatgpt`, `openai` (generic) |
+| `type` | `anthropic` (passthrough, no translation) or an adapter: `mimo`, `deepseek`, `chatgpt`, `codex`, `openai` (generic) |
 | `base_url` | Optional for named adapters, required for `openai` and `anthropic` |
 | `api_key` / `api_key_env` | Literal key, or an env var name. **Services don't see your shell env**, so prefer `api_key` for `rollet service`. An `anthropic` provider with no key forwards Claude Code's own login |
 | `model`, `small_model` | `small_model` replaces `model` where Claude Code asks for a haiku model (titles, summaries) |
@@ -123,6 +123,22 @@ and a turn you cancel while it's being held never reaches the provider.
 | `extra_body` | Merged into every upstream request body, the escape hatch for provider knobs |
 | `weight` | Relative chance, default 1, `0` pauses |
 | `delay` | `{"first": "40-70s", "between": "1-4s"}` at the top level or per provider; see Fake latency |
+
+## ChatGPT subscription (Codex login)
+
+The `codex` provider uses your ChatGPT plan instead of an API key, signing in the same
+way the Codex CLI does:
+
+```sh
+rollet codex login          # shows a code, approve it at auth.openai.com/codex/device
+rollet provider add         # pick "ChatGPT subscription", then a model
+```
+
+rollet keeps its own login (`codex-auth.json`, next to the config) instead of reusing
+`~/.codex/auth.json`: OpenAI rotates the refresh token on every renewal, so two programs
+sharing one login keep logging each other out. It speaks the Responses API, carries the
+model's encrypted reasoning between turns, and maps Claude Code's effort setting to
+`reasoning.effort`.
 
 ## Adding a provider
 
@@ -157,8 +173,9 @@ and tool calls survive the round trip. PRs welcome.
 - **`count_tokens`** is estimated (bytes / 4) for translated providers.
 - **The blinding isn't perfect.** Ask a model who it is and it may tell you; speed and
   style are clues too. That's part of the game.
-- **ChatGPT subscription (Codex login) isn't supported yet.** `chatgpt` uses an OpenAI API
-  key.
+- **`codex` uses an undocumented backend.** It's the endpoint the Codex CLI itself talks
+  to, so it works today but OpenAI can change it without notice, and those sessions spend
+  your plan's usage limits.
 - The macOS LaunchAgent is generated and validated as XML in tests, but hasn't been run
   on a Mac yet.
 

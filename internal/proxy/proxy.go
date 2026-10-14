@@ -16,6 +16,7 @@ import (
 
 	"github.com/ruivalim/claude-rollet/internal/adapters"
 	"github.com/ruivalim/claude-rollet/internal/claudecode"
+	"github.com/ruivalim/claude-rollet/internal/codex"
 	"github.com/ruivalim/claude-rollet/internal/config"
 	"github.com/ruivalim/claude-rollet/internal/roll"
 	"github.com/ruivalim/claude-rollet/internal/store"
@@ -33,6 +34,9 @@ type Server struct {
 	// the server log is enough to spoil the experiment.
 	Reveal bool
 
+	// CodexAuth holds the ChatGPT subscription login for "codex" providers.
+	CodexAuth *codex.Auth
+
 	// ConfigPath, when set, is re-read whenever the file changes, so
 	// `rollet provider add` or `rollet odds` apply without a restart.
 	ConfigPath string
@@ -48,9 +52,10 @@ type Server struct {
 
 func New(cfg *config.Config, st *store.Store, logger *log.Logger) *Server {
 	return &Server{
-		cfg:   cfg,
-		Store: st,
-		Intn:  roll.CryptoIntn,
+		CodexAuth: codex.NewAuth(codex.DefaultPath()),
+		cfg:       cfg,
+		Store:     st,
+		Intn:      roll.CryptoIntn,
 		Client: &http.Client{Transport: &http.Transport{
 			Proxy:                 http.ProxyFromEnvironment,
 			ResponseHeaderTimeout: 10 * time.Minute,
@@ -162,12 +167,92 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	switch prov.Type {
-	case config.TypeAnthropic:
+	a, _ := adapters.Get(prov.Type)
+	switch {
+	case prov.Type == config.TypeAnthropic:
 		s.passthrough(w, r, body, *prov)
+	case a.Protocol == adapters.ProtocolResponses:
+		s.responses(w, r, body, *prov, sess.ID)
 	default:
 		s.openai(w, r, body, *prov)
 	}
+}
+
+func (s *Server) responses(w http.ResponseWriter, r *http.Request, body []byte, p config.Provider, sessionID string) {
+	var req translate.AnthropicRequest
+	if err := json.Unmarshal(body, &req); err != nil {
+		writeError(w, 400, "invalid request body: "+err.Error())
+		return
+	}
+	tok, err := s.CodexAuth.Token(r.Context())
+	if err != nil {
+		s.Log.Printf("codex auth: %v", err)
+		writeError(w, 401, "rollet: "+err.Error())
+		return
+	}
+	upBody, err := translate.ToResponses(&req, translate.ResponsesOptions{Model: p.ModelFor(req.Model), SessionID: sessionID})
+	if err != nil {
+		writeError(w, 400, "translating request: "+err.Error())
+		return
+	}
+	if a, _ := adapters.Get(p.Type); a.Patch != nil {
+		a.Patch(upBody)
+	}
+	maps.Copy(upBody, p.ExtraBody)
+
+	raw, _ := json.Marshal(upBody)
+	up, err := http.NewRequestWithContext(r.Context(), http.MethodPost, p.BaseURL+"/codex/responses", bytes.NewReader(raw))
+	if err != nil {
+		writeError(w, 500, err.Error())
+		return
+	}
+	up.Header.Set("Content-Type", "application/json")
+	up.Header.Set("Accept", "text/event-stream")
+	up.Header.Set("Authorization", "Bearer "+tok.Access)
+	up.Header.Set("Chatgpt-Account-Id", tok.AccountID)
+	up.Header.Set("OpenAI-Beta", "responses=experimental")
+	up.Header.Set("Originator", "rollet")
+	up.Header.Set("Session-Id", sessionID)
+	resp, err := s.Client.Do(up)
+	if err != nil {
+		s.Log.Printf("upstream %s: %v", s.name(&p), err)
+		writeError(w, 502, "upstream unreachable: "+err.Error())
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 300 {
+		raw, _ := io.ReadAll(io.LimitReader(resp.Body, 1<<20))
+		msg := UpstreamMessage(raw)
+		s.Log.Printf("upstream %s: HTTP %d: %s", s.name(&p), resp.StatusCode, msg)
+		writeError(w, resp.StatusCode, msg)
+		return
+	}
+
+	if req.Stream {
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.WriteHeader(200)
+		flush := func() {}
+		if f, ok := w.(http.Flusher); ok {
+			flush = f.Flush
+		}
+		if err := translate.StreamResponses(resp.Body, w, flush, req.Model); err != nil {
+			s.Log.Printf("stream %s: %v", s.name(&p), err)
+		}
+		return
+	}
+	// The backend only streams; collect it for clients that didn't ask to.
+	var buf bytes.Buffer
+	if err := translate.StreamResponses(resp.Body, &buf, nil, req.Model); err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	msg, err := translate.Collect(buf.Bytes())
+	if err != nil {
+		writeError(w, 502, err.Error())
+		return
+	}
+	writeJSON(w, 200, msg)
 }
 
 func (s *Server) openai(w http.ResponseWriter, r *http.Request, body []byte, p config.Provider) {
@@ -295,8 +380,9 @@ func DoOpenAI(r *http.Request, client *http.Client, p config.Provider, body map[
 // provider returned.
 func UpstreamMessage(raw []byte) string {
 	var e struct {
-		Error any    `json:"error"`
-		Msg   string `json:"message"`
+		Error  any    `json:"error"`
+		Msg    string `json:"message"`
+		Detail any    `json:"detail"`
 	}
 	if json.Unmarshal(raw, &e) == nil {
 		switch v := e.Error.(type) {
@@ -311,6 +397,9 @@ func UpstreamMessage(raw []byte) string {
 		}
 		if e.Msg != "" {
 			return e.Msg
+		}
+		if d, ok := e.Detail.(string); ok && d != "" {
+			return d // ChatGPT backend style: {"detail": "..."}
 		}
 	}
 	msg := strings.TrimSpace(string(raw))

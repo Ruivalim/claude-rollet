@@ -44,6 +44,9 @@ type streamer struct {
 	hadTools bool
 	finish   string
 	usage    openAIUsage
+	// sig, when set, is the signature for the open thinking block; otherwise
+	// ReasoningSignature is used.
+	sig string
 }
 
 // Stream reads an OpenAI SSE body and writes Anthropic SSE. On a mid-stream
@@ -182,10 +185,15 @@ func (s *streamer) closeBlock() {
 		return
 	}
 	if s.kind == "thinking" {
+		sig := s.sig
+		if sig == "" {
+			sig = ReasoningSignature
+		}
 		s.event("content_block_delta", map[string]any{
 			"type": "content_block_delta", "index": s.index,
-			"delta": map[string]any{"type": "signature_delta", "signature": ReasoningSignature},
+			"delta": map[string]any{"type": "signature_delta", "signature": sig},
 		})
+		s.sig = ""
 	}
 	s.event("content_block_stop", map[string]any{"type": "content_block_stop", "index": s.index})
 	s.kind = ""

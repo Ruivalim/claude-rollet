@@ -22,6 +22,11 @@ type AnthropicRequest struct {
 	TopP          *float64        `json:"top_p,omitempty"`
 	StopSequences []string        `json:"stop_sequences,omitempty"`
 	Stream        bool            `json:"stream,omitempty"`
+	// Claude Code's effort knob (low..max); the Codex adapter maps it to
+	// reasoning.effort.
+	OutputConfig *struct {
+		Effort string `json:"effort,omitempty"`
+	} `json:"output_config,omitempty"`
 }
 
 type Message struct {

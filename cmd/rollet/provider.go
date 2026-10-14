@@ -14,6 +14,7 @@ import (
 	"github.com/charmbracelet/huh"
 
 	"github.com/ruivalim/claude-rollet/internal/adapters"
+	"github.com/ruivalim/claude-rollet/internal/codex"
 	"github.com/ruivalim/claude-rollet/internal/config"
 	"github.com/ruivalim/claude-rollet/internal/probe"
 )
@@ -112,9 +113,10 @@ func providerForm(cfg *config.Config, p config.Provider, editing bool) error {
 	if editing {
 		nameInput = nameInput.Description("can't be renamed: past sessions point to it")
 	}
-	group := []huh.Field{
-		huh.NewInput().Title("Base URL").Value(&p.BaseURL).Validate(validURL),
-		huh.NewInput().Title("API key").Description(keyHint).EchoMode(huh.EchoModePassword).Value(&keyField).Validate(func(s string) error {
+	adapter, _ := adapters.Get(p.Type)
+	group := []huh.Field{huh.NewInput().Title("Base URL").Value(&p.BaseURL).Validate(validURL)}
+	if !adapter.OAuth {
+		group = append(group, huh.NewInput().Title("API key").Description(keyHint).EchoMode(huh.EchoModePassword).Value(&keyField).Validate(func(s string) error {
 			if p.Translated() && strings.TrimSpace(s) == "" {
 				return errors.New("required")
 			}
@@ -122,7 +124,7 @@ func providerForm(cfg *config.Config, p config.Provider, editing bool) error {
 				return fmt.Errorf("$%s is empty in this shell", v)
 			}
 			return nil
-		}),
+		}))
 	}
 	if !editing {
 		group = append([]huh.Field{nameInput}, group...)
@@ -137,6 +139,14 @@ func providerForm(cfg *config.Config, p config.Provider, editing bool) error {
 		p.APIKeyEnv = v
 	} else {
 		p.APIKey = strings.TrimSpace(keyField)
+	}
+	if adapter.OAuth {
+		if _, err := codex.NewAuth(codex.DefaultPath()).Status(); err != nil {
+			fmt.Println(sMuted.Render("This provider uses your ChatGPT subscription. Let's sign in first."))
+			if err := codexLogin(); err != nil {
+				return err
+			}
+		}
 	}
 
 	if err := modelForm(&p); err != nil {
@@ -425,6 +435,12 @@ func printProviders(cfg *config.Config) error {
 		}
 		key := sGood.Render("ok")
 		switch {
+		case p.Type == "codex":
+			if _, err := codex.NewAuth(codex.DefaultPath()).Status(); err != nil {
+				key = sBad.Render("logged out")
+			} else {
+				key = sGood.Render("chatgpt login")
+			}
 		case p.Type == config.TypeAnthropic && p.APIKey == "" && p.APIKeyEnv == "":
 			key = sMuted.Render("claude login")
 		case p.Key() == "":

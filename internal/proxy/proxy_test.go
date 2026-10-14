@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ruivalim/claude-rollet/internal/codex"
 	"github.com/ruivalim/claude-rollet/internal/config"
 	"github.com/ruivalim/claude-rollet/internal/store"
 	"github.com/ruivalim/claude-rollet/internal/translate"
@@ -389,5 +390,78 @@ func TestDelayCancelledNeverReachesUpstream(t *testing.T) {
 	time.Sleep(2500 * time.Millisecond) // past the delay: a leaked request would have gone out by now
 	if got.n() != 0 {
 		t.Errorf("cancelled turn still hit the provider %d time(s)", got.n())
+	}
+}
+
+func fakeCodex(t *testing.T) (*httptest.Server, *captured) {
+	c := &captured{}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body := c.add(r)
+		if r.URL.Path != "/backend-api/codex/responses" {
+			w.WriteHeader(404)
+			return
+		}
+		if body["store"] != false || body["stream"] != true {
+			w.WriteHeader(400)
+			_, _ = io.WriteString(w, `{"detail":"Store must be set to false"}`)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		for _, e := range []string{
+			`{"type":"response.output_item.added","output_index":0,"item":{"type":"message"}}`,
+			`{"type":"response.output_text.delta","output_index":0,"delta":"hello from codex"}`,
+			`{"type":"response.output_item.done","output_index":0,"item":{"type":"message"}}`,
+			`{"type":"response.completed","response":{"status":"completed","usage":{"input_tokens":5,"output_tokens":3}}}`,
+		} {
+			_, _ = io.WriteString(w, "data: "+e+"\n\n")
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return srv, c
+}
+
+func codexProxy(t *testing.T, loggedIn bool) (*httptest.Server, *captured) {
+	up, got := fakeCodex(t)
+	px, s := newProxy(t, config.Provider{Name: "gpt", Type: "codex", BaseURL: up.URL + "/backend-api", Model: "gpt-6-sol"})
+	s.CodexAuth = codex.NewAuth(filepath.Join(t.TempDir(), "codex-auth.json"))
+	if loggedIn {
+		if err := s.CodexAuth.Save(codex.Tokens{Access: "tok-1", Refresh: "r", Expires: time.Now().Add(time.Hour), AccountID: "acct-1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	return px, got
+}
+
+func TestCodexRoute(t *testing.T) {
+	px, got := codexProxy(t, true)
+	resp, body := post(t, px.URL+"/v1/messages", "cx1", strings.Replace(msgBody, `"max_tokens"`, `"stream":true,"max_tokens"`, 1))
+	if resp.StatusCode != 200 || !strings.Contains(body, "hello from codex") || !strings.Contains(body, "message_stop") {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	h := got.headers[0]
+	if h.Get("Authorization") != "Bearer tok-1" || h.Get("Chatgpt-Account-Id") != "acct-1" || h.Get("Session-Id") != "cx1" {
+		t.Errorf("headers = %v", h)
+	}
+	if got.bodies[0]["model"] != "gpt-6-sol" || got.bodies[0]["prompt_cache_key"] != "cx1" {
+		t.Errorf("body = %v", got.bodies[0])
+	}
+
+	// non-streaming request from Claude Code: collected into one message
+	resp, body = post(t, px.URL+"/v1/messages", "cx1", msgBody)
+	var msg map[string]any
+	_ = json.Unmarshal([]byte(body), &msg)
+	if resp.StatusCode != 200 || msg["model"] != "claude-opus-5-5" || msg["stop_reason"] != "end_turn" {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+}
+
+func TestCodexNotLoggedIn(t *testing.T) {
+	px, got := codexProxy(t, false)
+	resp, body := post(t, px.URL+"/v1/messages", "cx2", msgBody)
+	if resp.StatusCode != 401 || !strings.Contains(body, "rollet codex login") {
+		t.Fatalf("%d %s", resp.StatusCode, body)
+	}
+	if got.n() != 0 {
+		t.Error("no token, no upstream call")
 	}
 }

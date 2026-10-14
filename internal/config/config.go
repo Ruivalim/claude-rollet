@@ -145,7 +145,7 @@ func (c *Config) Validate() error {
 			if p.Model == "" {
 				return fmt.Errorf("%s: model is required", where)
 			}
-			if p.Key() == "" {
+			if a, _ := adapters.Get(p.Type); !a.OAuth && p.Key() == "" {
 				if p.APIKeyEnv != "" {
 					return fmt.Errorf("%s: env var %s is empty", where, p.APIKeyEnv)
 				}

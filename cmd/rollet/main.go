@@ -42,6 +42,7 @@ func sections() []section {
 			{"provider test", "[name | --all]", "test text, streaming and tool calls through the proxy", cmdProviderTest},
 			{"provider list", "", "providers, weights and the real chance of each", cmdProviderList},
 			{"provider rm", "<name>", "remove a provider", cmdProviderRm},
+			{"codex", "login|logout|status", "sign in with your ChatGPT subscription (for codex providers)", cmdCodex},
 			{"odds", "[0.2 | 20% | off]", "show or set the chance of landing on Claude", cmdOdds},
 			{"delay", "[first|between] <30s-70s|off> [--provider name]", "fake latency to blur the speed gap between models", cmdDelay},
 		}},

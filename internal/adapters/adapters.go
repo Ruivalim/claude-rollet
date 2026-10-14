@@ -17,7 +17,14 @@ type Adapter struct {
 	MaxTokensParam string
 	// Patch adjusts the translated body right before it is sent.
 	Patch func(body map[string]any)
+	// Protocol is "chat" (Chat Completions, the default) or "responses"
+	// (Responses API, for the ChatGPT subscription backend).
+	Protocol string
+	// OAuth adapters sign in with `rollet codex login` instead of an API key.
+	OAuth bool
 }
+
+const ProtocolResponses = "responses"
 
 var registry = map[string]Adapter{}
 
