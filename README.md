@@ -27,6 +27,10 @@ The only hint is the base URL in `/status`:
 
 ![Claude Code /status pointing at rollet on 127.0.0.1:7777](docs/screenshots/status.png)
 
+Then you reveal it. Same session: GPT on a ChatGPT subscription.
+
+![rollet sessions --reveal showing the session went to codex](docs/screenshots/reveal.png)
+
 ## How it stays blind
 
 - **One roll per session.** The first request of a Claude Code session picks a provider
