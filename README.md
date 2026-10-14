@@ -76,6 +76,24 @@ rollet odds 0.2             # Claude gets 20% of new sessions, the rest split by
 Without it, every provider competes by weight alone. Weight `0` pauses a provider without
 deleting it. Config changes apply to a running proxy without a restart.
 
+## Fake latency
+
+Speed is the biggest tell. Thinking models chew on Claude Code's huge first prompt for a
+while, then answer later turns quickly. A fast Claude next to them is obvious. `delay`
+holds requests for a random time inside a range, separately for the first turn of a
+session and for every later call:
+
+```sh
+rollet delay first 40-70s --provider claude   # slow Claude's first answer down
+rollet delay between 1-4s --provider claude   # and add a little jitter after that
+rollet delay between 0-2s                     # global: applies to every provider
+rollet delay off --provider claude            # drop the override, back to the global one
+```
+
+Provider values override the global ones field by field, and `0` on a provider switches
+a global delay off for it. The quota check Claude Code sends at startup is never delayed,
+and a turn you cancel while it's being held never reaches the provider.
+
 ## Config
 
 `~/.config/claude-rollet/config.json` (or `$ROLLET_HOME/config.json`), written with mode
@@ -86,7 +104,8 @@ deleting it. Config changes apply to a running proxy without a restart.
   "listen": "127.0.0.1:7777",
   "claude_odds": 0.5,
   "providers": [
-    { "name": "claude", "type": "anthropic", "base_url": "https://api.anthropic.com" },
+    { "name": "claude", "type": "anthropic", "base_url": "https://api.anthropic.com",
+      "delay": { "first": "40-70s", "between": "1-4s" } },
     { "name": "mimo", "type": "mimo", "api_key": "sk-...", "model": "mimo-v2.5-pro" },
     { "name": "gpt", "type": "chatgpt", "api_key": "sk-...", "model": "gpt-5.5", "weight": 2 }
   ]
@@ -103,6 +122,7 @@ deleting it. Config changes apply to a running proxy without a restart.
 | `max_tokens_param` | `max_tokens` or `max_completion_tokens`; the adapter sets a sensible default |
 | `extra_body` | Merged into every upstream request body, the escape hatch for provider knobs |
 | `weight` | Relative chance, default 1, `0` pauses |
+| `delay` | `{"first": "40-70s", "between": "1-4s"}` at the top level or per provider; see Fake latency |
 
 ## Adding a provider
 

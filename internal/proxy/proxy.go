@@ -3,6 +3,7 @@ package proxy
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -155,6 +156,12 @@ func (s *Server) messages(w http.ResponseWriter, r *http.Request) {
 		s.Log.Printf("session %s rolled -> %s  (%s)", short(sess.ID), s.name(prov), cc.CWD)
 	}
 
+	if !cc.Probe {
+		if !s.wait(r.Context(), cfg.DelayFor(*prov, cc.FirstTurn), sess.ID) {
+			return // client gave up while we were holding the request
+		}
+	}
+
 	switch prov.Type {
 	case config.TypeAnthropic:
 		s.passthrough(w, r, body, *prov)
@@ -215,6 +222,30 @@ func (s *Server) openai(w http.ResponseWriter, r *http.Request, body []byte, p c
 		return
 	}
 	writeJSON(w, 200, out)
+}
+
+// wait sleeps for a random duration inside rg. It returns false if the
+// client went away first, so a cancelled turn never reaches the provider.
+func (s *Server) wait(ctx context.Context, rg config.Range, sessionID string) bool {
+	if rg.Zero() {
+		return true
+	}
+	d := rg.Min
+	if span := rg.Max - rg.Min; span > 0 {
+		d += time.Duration(s.Intn(int64(span/time.Millisecond)+1)) * time.Millisecond
+	}
+	if s.Reveal {
+		// Only in reveal mode: a per-provider delay in the log is a tell.
+		s.Log.Printf("session %s delayed %s", short(sessionID), d.Round(time.Millisecond))
+	}
+	t := time.NewTimer(d)
+	defer t.Stop()
+	select {
+	case <-t.C:
+		return true
+	case <-ctx.Done():
+		return false
+	}
 }
 
 // BuildBody runs the shared translation, then the provider's adapter.

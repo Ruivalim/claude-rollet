@@ -95,3 +95,21 @@ func TestTranscript(t *testing.T) {
 		t.Error("missing session reported as found")
 	}
 }
+
+func TestProbeAndFirstTurn(t *testing.T) {
+	quota := Parse(nil, []byte(`{"max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`))
+	if !quota.Probe || quota.Title != "" {
+		t.Errorf("quota check must be a probe with no title: %+v", quota)
+	}
+	first := Parse(nil, []byte(realish))
+	if first.Probe || !first.FirstTurn {
+		t.Errorf("first real turn: %+v", first)
+	}
+	later := Parse(nil, []byte(`{"max_tokens":128000,"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"c"}]}`))
+	if later.Probe || later.FirstTurn {
+		t.Errorf("later turn: %+v", later)
+	}
+	if noMax := Parse(nil, []byte(`{"messages":[{"role":"user","content":"x"}]}`)); noMax.Probe {
+		t.Error("missing max_tokens is not a probe")
+	}
+}

@@ -436,9 +436,9 @@ func printProviders(cfg *config.Config) error {
 		if p.W() == 0 {
 			chance = sMuted.Render("paused")
 		}
-		rows = append(rows, []string{sBold.Render(p.Name), p.Type, model, strconv.Itoa(p.W()), chance, key})
+		rows = append(rows, []string{sBold.Render(p.Name), p.Type, model, strconv.Itoa(p.W()), chance, delayCell(cfg, p), key})
 	}
-	fmt.Println(table([]string{"NAME", "TYPE", "MODEL", "WEIGHT", "CHANCE", "KEY"}, rows))
+	fmt.Println(table([]string{"NAME", "TYPE", "MODEL", "WEIGHT", "CHANCE", "DELAY first / between", "KEY"}, rows))
 	fmt.Println()
 	if cfg.ClaudeOdds != nil {
 		hint("claude_odds = %s (change with: rollet odds 0.2)", pct(*cfg.ClaudeOdds))
@@ -549,4 +549,83 @@ func optionalInt(s string) error {
 		return errors.New("a positive whole number, or empty")
 	}
 	return nil
+}
+
+func delayCell(cfg *config.Config, p config.Provider) string {
+	first, between := cfg.DelayFor(p, true), cfg.DelayFor(p, false)
+	if first.Zero() && between.Zero() {
+		return sMuted.Render("none")
+	}
+	return first.String() + " / " + between.String()
+}
+
+func cmdDelay(args []string) error {
+	var provider string
+	var rest []string
+	for i := 0; i < len(args); i++ {
+		switch {
+		case args[i] == "--provider" && i+1 < len(args):
+			provider = args[i+1]
+			i++
+		case strings.HasPrefix(args[i], "--provider="):
+			provider = strings.TrimPrefix(args[i], "--provider=")
+		default:
+			rest = append(rest, args[i])
+		}
+	}
+	cfg, err := loadConfig()
+	if err != nil {
+		return err
+	}
+	if len(rest) == 0 {
+		return printProviders(cfg)
+	}
+
+	target := &cfg.Delay
+	label := "every provider"
+	if provider != "" {
+		_, p := cfg.Provider(provider)
+		if p == nil {
+			return fmt.Errorf("no provider named %q", provider)
+		}
+		target, label = &p.Delay, provider
+	}
+
+	switch {
+	case len(rest) == 1 && rest[0] == "off":
+		// Clearing a provider's override falls back to the global delay;
+		// to switch a global delay off for one provider, set it to 0.
+		*target = nil
+	case len(rest) == 2 && (rest[0] == "first" || rest[0] == "between"):
+		rg, err := config.ParseRange(rest[1])
+		if err != nil {
+			return err
+		}
+		if *target == nil {
+			*target = &config.Delay{}
+		}
+		v := rest[1]
+		if rg.Zero() {
+			v = "0"
+		}
+		if rest[0] == "first" {
+			(*target).First = v
+		} else {
+			(*target).Between = v
+		}
+		if (*target).First == "" && (*target).Between == "" {
+			*target = nil
+		}
+	default:
+		return errors.New("usage: rollet delay [first|between] <30s-70s|0> [--provider name]  or  rollet delay off [--provider name]")
+	}
+	if err := cfg.Validate(); err != nil {
+		return err
+	}
+	if err := cfg.Save(configPath()); err != nil {
+		return err
+	}
+	ok("Delay updated for %s.", label)
+	fmt.Println()
+	return printProviders(cfg)
 }

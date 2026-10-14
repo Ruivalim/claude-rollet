@@ -21,6 +21,7 @@ type requestView struct {
 	Metadata struct {
 		UserID string `json:"user_id"`
 	} `json:"metadata"`
+	MaxTokens  *int            `json:"max_tokens"`
 	System     json.RawMessage `json:"system"`
 	Messages   []rawMessage    `json:"messages"`
 	Safeguards []struct {
@@ -51,6 +52,11 @@ type Request struct {
 	SessionID string
 	CWD       string
 	Title     string
+	// Probe is Claude Code's quota check at startup: a "quota" message with
+	// max_tokens 1. It is not the user's prompt and nobody waits on it.
+	Probe bool
+	// FirstTurn means no assistant reply exists yet in this conversation.
+	FirstTurn bool
 }
 
 // Parse never fails: a request it can't read still gets a stable session key,
@@ -69,7 +75,17 @@ func Parse(h http.Header, body []byte) Request {
 	if r.CWD == "" {
 		r.CWD = cwdFromText(v)
 	}
-	r.Title = title(v)
+	r.Probe = v.MaxTokens != nil && *v.MaxTokens <= 1
+	if !r.Probe {
+		r.Title = title(v)
+	}
+	r.FirstTurn = true
+	for _, m := range v.Messages {
+		if m.Role == "assistant" {
+			r.FirstTurn = false
+			break
+		}
+	}
 	if r.SessionID == "" {
 		r.SessionID = fallbackID(v)
 	}

@@ -43,6 +43,7 @@ func sections() []section {
 			{"provider list", "", "providers, weights and the real chance of each", cmdProviderList},
 			{"provider rm", "<name>", "remove a provider", cmdProviderRm},
 			{"odds", "[0.2 | 20% | off]", "show or set the chance of landing on Claude", cmdOdds},
+			{"delay", "[first|between] <30s-70s|off> [--provider name]", "fake latency to blur the speed gap between models", cmdDelay},
 		}},
 		{"Proxy", []command{
 			{"serve", "[--claude-odds x] [--reveal]", "run the proxy in the foreground", cmdServe},

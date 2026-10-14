@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -345,5 +346,48 @@ func TestBuildBodyAppliesAdapter(t *testing.T) {
 	body, _ = BuildBody(&req, config.Provider{Type: "mimo", Model: "mimo-v2.5-pro"})
 	if body["max_tokens"] != 128000 || body["temperature"] != float64(1) {
 		t.Errorf("mimo body = %v", body)
+	}
+}
+
+func TestDelay(t *testing.T) {
+	up, got := fakeOpenAI(t, 200)
+	px, s := newProxy(t, config.Provider{Name: "x", Type: config.TypeOpenAI, BaseURL: up.URL + "/v1", APIKey: "k", Model: "m"})
+	s.Config().Delay = &config.Delay{First: "300ms", Between: "100ms-150ms"}
+
+	timed := func(body string) time.Duration {
+		start := time.Now()
+		post(t, px.URL+"/v1/messages", "d1", body)
+		return time.Since(start)
+	}
+	if d := timed(`{"model":"m","max_tokens":1,"messages":[{"role":"user","content":"quota"}]}`); d > 100*time.Millisecond {
+		t.Errorf("quota probe was delayed %v", d)
+	}
+	if d := timed(msgBody); d < 300*time.Millisecond {
+		t.Errorf("first turn took %v, want >= 300ms", d)
+	}
+	later := `{"model":"m","max_tokens":10,"messages":[{"role":"user","content":"a"},{"role":"assistant","content":"b"},{"role":"user","content":"c"}]}`
+	if d := timed(later); d < 100*time.Millisecond || d > 290*time.Millisecond {
+		t.Errorf("later turn took %v, want the between range", d)
+	}
+	if got.n() != 3 {
+		t.Errorf("upstream calls = %d", got.n())
+	}
+}
+
+func TestDelayCancelledNeverReachesUpstream(t *testing.T) {
+	up, got := fakeOpenAI(t, 200)
+	px, s := newProxy(t, config.Provider{Name: "x", Type: config.TypeOpenAI, BaseURL: up.URL + "/v1", APIKey: "k", Model: "m"})
+	s.Config().Delay = &config.Delay{First: "2s"}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, px.URL+"/v1/messages", strings.NewReader(msgBody))
+	req.Header.Set("X-Claude-Code-Session-Id", "c1")
+	if _, err := http.DefaultClient.Do(req); err == nil {
+		t.Fatal("expected the client timeout")
+	}
+	time.Sleep(2500 * time.Millisecond) // past the delay: a leaked request would have gone out by now
+	if got.n() != 0 {
+		t.Errorf("cancelled turn still hit the provider %d time(s)", got.n())
 	}
 }

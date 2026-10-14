@@ -134,3 +134,40 @@ func TestBlindCells(t *testing.T) {
 		t.Error("clip must count runes")
 	}
 }
+
+func TestDelayCommand(t *testing.T) {
+	t.Setenv("ROLLET_HOME", t.TempDir())
+	cfg := &config.Config{Providers: []config.Provider{
+		{Name: "claude", Type: config.TypeAnthropic, BaseURL: "https://api.anthropic.com"},
+		{Name: "mimo", Type: "mimo", BaseURL: "https://x", Model: "m", APIKey: "k"},
+	}}
+	if err := cfg.Save(configPath()); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{
+		{"first", "30-70s", "--provider", "claude"},
+		{"between", "1s-3s"},
+		{"--provider=mimo", "first", "0"},
+	} {
+		if err := cmdDelay(args); err != nil {
+			t.Fatalf("%v: %v", args, err)
+		}
+	}
+	got, _ := config.Load(configPath())
+	if got.Delay.Between != "1s-3s" || got.Providers[0].Delay.First != "30-70s" || got.Providers[1].Delay.First != "0" {
+		t.Fatalf("saved = %+v / %+v / %+v", got.Delay, got.Providers[0].Delay, got.Providers[1].Delay)
+	}
+	if err := cmdDelay([]string{"first", "70s-30s"}); err == nil {
+		t.Error("inverted range must be rejected")
+	}
+	if err := cmdDelay([]string{"off", "--provider", "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ = config.Load(configPath())
+	if got.Providers[0].Delay != nil || got.Delay == nil {
+		t.Error("off --provider should only clear that provider's override")
+	}
+	if err := cmdDelay([]string{"first", "1s", "--provider", "ghost"}); err == nil {
+		t.Error("unknown provider must fail")
+	}
+}

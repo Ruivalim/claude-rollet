@@ -43,6 +43,9 @@ type Provider struct {
 
 	// Relative weight inside its group. nil means 1, 0 takes it out of the roll.
 	Weight *int `json:"weight,omitempty"`
+
+	// Overrides the global delay for sessions on this provider.
+	Delay *Delay `json:"delay,omitempty"`
 }
 
 type Config struct {
@@ -51,6 +54,9 @@ type Config struct {
 	// Probability (0..1) that a new session lands on an anthropic provider.
 	// nil means "no special treatment": every provider competes by weight alone.
 	ClaudeOdds *float64 `json:"claude_odds,omitempty"`
+
+	// Artificial latency for every provider; see Delay.
+	Delay *Delay `json:"delay,omitempty"`
 
 	Providers []Provider `json:"providers"`
 }
@@ -98,6 +104,9 @@ func (c *Config) Validate() error {
 	if c.ClaudeOdds != nil && (*c.ClaudeOdds < 0 || *c.ClaudeOdds > 1) {
 		return fmt.Errorf("claude_odds must be between 0 and 1, got %v", *c.ClaudeOdds)
 	}
+	if err := c.Delay.validate("delay"); err != nil {
+		return err
+	}
 	seen := map[string]bool{}
 	active := 0
 	for i, p := range c.Providers {
@@ -111,6 +120,9 @@ func (c *Config) Validate() error {
 		seen[p.Name] = true
 		if p.W() < 0 {
 			return fmt.Errorf("%s: weight cannot be negative", where)
+		}
+		if err := p.Delay.validate(where + " delay"); err != nil {
+			return err
 		}
 		if p.W() > 0 {
 			active++
