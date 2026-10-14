@@ -88,7 +88,12 @@ install: ## Instala o rollet no GOBIN (go install)
 	@echo "$(GREEN)▸ install$(RESET)"
 	go install -ldflags "$(LDFLAGS)" ./cmd/rollet
 
+.PHONY: dist
+dist: ## Gera os tarballs de release em dist/ (linux e macOS, amd64 e arm64)
+	@echo "$(GREEN)▸ dist $(VERSION)$(RESET)"
+	scripts/dist.sh $(VERSION)
+
 .PHONY: clean
 clean: ## Remove artefatos gerados
 	@echo "$(GREEN)▸ clean$(RESET)"
-	rm -rf $(BIN_DIR)
+	rm -rf $(BIN_DIR) dist

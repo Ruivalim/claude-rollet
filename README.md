@@ -29,12 +29,28 @@ claude ──► rollet (127.0.0.1:7777) ──┬──► Anthropic API     (p
 
 ## Install
 
-Needs Go 1.25+.
+**Download** (Linux and macOS, amd64 and arm64), checksum verified, into `~/.local/bin`:
 
 ```sh
-git clone <this repo> && cd claude-rollet
-make install            # go install, lands in your GOBIN
+curl -fsSL https://raw.githubusercontent.com/ruivalim/claude-rollet/main/install.sh | sh
 ```
+
+**Let your agent do it.** Paste this into Claude Code (or Codex, Pi...):
+
+> Install claude-rollet for me by following
+> https://raw.githubusercontent.com/ruivalim/claude-rollet/main/AGENTIC_INSTALL.md
+
+It installs the binary, asks which providers you want, writes the config, tests every
+provider and sets up the service. See [AGENTIC_INSTALL.md](AGENTIC_INSTALL.md).
+
+**From source** (Go 1.25+):
+
+```sh
+go install github.com/ruivalim/claude-rollet/cmd/rollet@latest
+# or: git clone, then make install
+```
+
+Binaries are built by the release workflow whenever a `v*` tag is pushed.
 
 ## Quick start
 
@@ -183,7 +199,8 @@ and tool calls survive the round trip. PRs welcome.
 
 ```sh
 make            # list targets
-make check      # lint + race tests + build, the same thing CI should run
+make check      # lint + race tests + build, exactly what CI runs
+make dist       # the release tarballs, exactly what the release workflow publishes
 ```
 
 MIT licensed.
